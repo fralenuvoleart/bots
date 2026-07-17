@@ -2,6 +2,7 @@ const { Telegraf } = require("telegraf");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || "546485204";
+const INTEGRATELY_WEBHOOK = "https://webhooks.integrately.com/a/webhooks/11e1f7e4cb3e4517abcea0d9cd833383";
 
 if (!BOT_TOKEN) {
   console.error("Missing BOT_TOKEN environment variable");
@@ -36,6 +37,21 @@ bot.on("text", async (ctx) => {
     // Reply only on first message
     if (isFirstMessage) {
       repliedUsers.add(userId);
+
+      // Fire-and-forget: notify Integrately
+      fetch(INTEGRATELY_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          username: user.username,
+          message: text,
+          timestamp: new Date().toISOString(),
+        }),
+      }).catch((err) => console.error("Integrately webhook failed:", err.message));
+
       await ctx.reply(
         `Hi ${name}, your message has been forwarded to our team. A human support member will get back to you shortly — this is not an automated conversation.`,
       );
