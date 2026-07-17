@@ -13,12 +13,18 @@ const bot = new Telegraf(BOT_TOKEN);
 
 // Track users who already received the auto-reply
 const repliedUsers = new Set();
+// Store /start deep-link payload per user
+const startPayloads = new Map();
 
 bot.on("text", async (ctx) => {
   const text = ctx.message.text;
 
   // /start — welcome message, no forward
   if (text === "/start" || text.startsWith("/start ")) {
+    // Capture deep-link payload (e.g. /start REF123)
+    const payload = text.slice("/start".length).trim();
+    if (payload) startPayloads.set(ctx.from.id, payload);
+
     await ctx.reply(
       "Welcome to PBS Services! 👋\n\nA member of our team will personally respond to your inquiry. Please type your message below and we'll get back to you as soon as possible.",
     );
@@ -48,6 +54,7 @@ bot.on("text", async (ctx) => {
           lastName: user.last_name,
           username: user.username,
           message: text,
+          startPayload: startPayloads.get(userId) || null,
           timestamp: new Date().toISOString(),
         }),
       }).catch((err) => console.error("Integrately webhook failed:", err.message));
