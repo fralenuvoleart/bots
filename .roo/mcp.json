@@ -19,7 +19,8 @@
 				"sevalla.processes.list",
 				"sevalla.applications.logs.runtime",
 				"sevalla.deployments.start",
-				"sevalla.resources.process-resource-types"
+				"sevalla.resources.process-resource-types",
+				"sevalla.deployments.list"
 			]
 		}
 	}

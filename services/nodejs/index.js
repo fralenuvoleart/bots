@@ -21,7 +21,7 @@ bot.launch();
 console.log("Bot started — polling for messages");
 
 // ── Cache Warmer (daily at 03:00 UTC) ──
-cron.schedule("0 3 * * *", () => {
+cron.schedule("0 1 * * *", () => {
   console.log("[cron] Starting cache warmer...");
   runWarmer()
     .then(() => console.log("[cron] Cache warmer finished."))
