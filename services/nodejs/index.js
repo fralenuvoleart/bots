@@ -20,7 +20,7 @@ process.once("SIGTERM", () => bot.stop("SIGTERM"));
 bot.launch();
 console.log("Bot started — polling for messages");
 
-// ── Cache Warmer (daily at 03:00 UTC) ──
+// ── Cache Warmer (daily at 01:00 UTC) ──
 cron.schedule("0 1 * * *", () => {
   console.log("[cron] Starting cache warmer...");
   runWarmer()
@@ -28,4 +28,4 @@ cron.schedule("0 1 * * *", () => {
     .catch((err) => console.error("[cron] Cache warmer failed:", err.message));
 });
 
-console.log("Cache warmer scheduled daily at 03:00 UTC");
+console.log("Cache warmer scheduled daily at 01:00 UTC");
