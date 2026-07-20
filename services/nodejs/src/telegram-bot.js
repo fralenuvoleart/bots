@@ -80,6 +80,14 @@ function createBot(token, adminChatId, messages) {
       return;
     }
 
+    // /reset — clear first-message flag for re-testing
+    if (text === "/reset") {
+      repliedUsers.delete(ctx.from.id);
+      startPayloads.delete(ctx.from.id);
+      await ctx.reply("State reset. Your next message will be treated as first contact.");
+      return;
+    }
+
     // Ignore other bot commands
     if (text.startsWith("/")) return;
 
