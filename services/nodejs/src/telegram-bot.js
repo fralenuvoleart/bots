@@ -56,8 +56,6 @@ function createBot(token, adminChatId, messages) {
   if (process.env.MSG_WELCOME_RU) MSG.welcome.ru = process.env.MSG_WELCOME_RU;
   if (process.env.MSG_AUTOREPLY) MSG.autoreply.default = process.env.MSG_AUTOREPLY;
   if (process.env.MSG_AUTOREPLY_RU) MSG.autoreply.ru = process.env.MSG_AUTOREPLY_RU;
-  if (process.env.MSG_SECOND_AUTOREPLY) MSG.secondAutoreply.default = process.env.MSG_SECOND_AUTOREPLY;
-  if (process.env.MSG_SECOND_AUTOREPLY_RU) MSG.secondAutoreply.ru = process.env.MSG_SECOND_AUTOREPLY_RU;
 
   const t = (key, lang, name) => {
     const msg = MSG[key][lang] || MSG[key].default;
@@ -66,10 +64,10 @@ function createBot(token, adminChatId, messages) {
 
   const bot = new Telegraf(token);
 
-  // In-memory state: tracks first-contact users, /start deep-link payloads, and delayed second-message timers
+  // In-memory state: tracks first-contact users and /start deep-link payloads
   const repliedUsers = new Set();
   const startPayloads = new Map();
-  const secondMessageTimers = new Map(); // userId → timeoutId
+  const autoreplyTimers = new Map(); // userId → timeoutId for delayed auto-reply
 
   bot.on("text", async (ctx) => {
     const text = ctx.message.text;
@@ -106,10 +104,10 @@ function createBot(token, adminChatId, messages) {
     const name = user.first_name || "User";
     const isFirstMessage = !repliedUsers.has(userId);
 
-    // Reset second-message timer on every new message (restarts the delay)
-    if (secondMessageTimers.has(userId)) {
-      clearTimeout(secondMessageTimers.get(userId));
-      secondMessageTimers.delete(userId);
+    // Reset delayed auto-reply timer on every new message (restarts the delay)
+    if (autoreplyTimers.has(userId)) {
+      clearTimeout(autoreplyTimers.get(userId));
+      autoreplyTimers.delete(userId);
     }
 
     // ── Forward to admin (critical — retry) ──
@@ -167,20 +165,17 @@ function createBot(token, adminChatId, messages) {
         `Integrately webhook for user ${userId}`
       );
 
-      // Auto-reply (retry)
-      await withRetry(() => ctx.reply(t("autoreply", lang, name)), 2, `autoreply to ${userId}`);
-
-      // Schedule delayed second auto-reply (configurable delay, resets on new messages)
-      const secondDelay = parseInt(process.env.SECOND_MESSAGE_DELAY_MS || "20000", 10);
+      // Schedule delayed auto-reply (configurable, resets on new messages)
+      const autoReplyDelay = parseInt(process.env.AUTOREPLY_DELAY_MS || "20000", 10);
       const timerId = setTimeout(async () => {
-        secondMessageTimers.delete(userId);
+        autoreplyTimers.delete(userId);
         await withRetry(
-          () => ctx.telegram.sendMessage(userId, t("secondAutoreply", lang, name)),
+          () => ctx.telegram.sendMessage(userId, t("autoreply", lang, name)),
           2,
-          `second autoreply to ${userId}`
+          `autoreply to ${userId}`
         );
-      }, secondDelay);
-      secondMessageTimers.set(userId, timerId);
+      }, autoReplyDelay);
+      autoreplyTimers.set(userId, timerId);
     }
   });
 
