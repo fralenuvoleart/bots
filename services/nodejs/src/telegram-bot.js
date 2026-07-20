@@ -104,7 +104,24 @@ function createBot(token, adminChatId, messages) {
     const isFirstMessage = !repliedUsers.has(userId);
 
     // ── Forward to admin (critical — retry) ──
-    await withRetry(() => ctx.forwardMessage(adminChatId), 2, `forward to admin from ${userId}`);
+    const fwdMsg = await withRetry(
+      () => ctx.forwardMessage(adminChatId),
+      2,
+      `forward to admin from ${userId}`
+    );
+
+    // Deep link to forwarded message in Staff Group Chat
+    const cleanGroupId = adminChatId.startsWith("-100")
+      ? adminChatId.slice(4)
+      : adminChatId;
+    const forwardedMessageLink = fwdMsg?.message_id
+      ? `https://t.me/c/${cleanGroupId}/${fwdMsg.message_id}`
+      : null;
+
+    // Deep link to open chat with the user
+    const userChatLink = user.username
+      ? `https://t.me/${user.username}`
+      : `tg://user?id=${userId}`;
 
     // ── First-message handling ──
     if (isFirstMessage) {
@@ -122,6 +139,8 @@ function createBot(token, adminChatId, messages) {
         language: lang,
         message: text,
         startPayload: payload || null,
+        forwardedMessageLink,
+        userChatLink,
         timestamp: new Date().toISOString(),
       });
 

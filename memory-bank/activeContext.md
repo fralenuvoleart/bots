@@ -8,6 +8,11 @@ Project is `automations` — two service runtimes:
 
 ## Recent Changes
 
+- **2026-07-20**: Added forwarded message deep link to Integrately webhook in [`telegram-bot.js`](../services/nodejs/src/telegram-bot.js):
+  - `forwardMessage` return value now captured (`fwdMsg.message_id`)
+  - Deep link constructed: `https://t.me/c/{cleanGroupId}/{message_id}` (strips `-100` prefix from supergroup ID)
+  - `forwardedMessageLink` field added to webhook payload (null-safe: falls back to `null` if forward fails)
+  - Applies to first-contact webhook only (existing scope unchanged)
 - **2026-07-20**: Fixed [`sevalla-warmer.sh`](../services/nodejs/scripts/sevalla-warmer.sh) — now uses `sh -c "nohup npm run warmer &"` to background the warmer. Sevalla exec API has max 60s timeout; the warmer takes ~18min. Also corrected `timeout` field (API max is 60, was sending 300).
 - **2026-07-20**: Deleted root `package.json` — confirmed unreferenced by any shell script, JS file, Sevalla action, or quick command. Deploys use `services/nodejs/package.json` exclusively.
 - **2026-07-20**: Fixed [`index.js`](../services/nodejs/index.js) — `bot.launch()` now wrapped in retry logic (5 attempts, 3s delay) for 409 Conflict errors. Added global `unhandledRejection` handler to prevent unexpected promise rejections from crashing the entire process (logs them instead).
