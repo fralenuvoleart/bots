@@ -101,7 +101,7 @@ async function fetchSitemap(url, urlsSet) {
 }
 
 /**
- * Warms a single URL. Returns { ok, status, error, kinsta, cdn, edge }.
+ * Warms a single URL. Returns { ok, status, error, kinsta, cdn, edge, redirected, finalUrl }.
  */
 async function warmUrl(url) {
   for (let attempt = 0; attempt <= RETRY_COUNT; attempt++) {
@@ -112,11 +112,11 @@ async function warmUrl(url) {
         signal: AbortSignal.timeout(10000),
       });
       const duration = ((Date.now() - start) / 1000).toFixed(2);
-      const kinsta = res.headers.get("X-Kinsta-Cache") || "UNKNOWN";
-      const cdn = res.headers.get("CF-Cache-Status") || "UNKNOWN";
-      const edge = res.headers.get("Ki-Cf-Cache-Status") || "UNKNOWN";
+      const kinsta = (res.headers.get("X-Kinsta-Cache") || "MISSING").toUpperCase();
+      const cdn = (res.headers.get("CF-Cache-Status") || "MISSING").toUpperCase();
+      const edge = (res.headers.get("Ki-Cf-Cache-Status") || "MISSING").toUpperCase();
       log(`[${res.status}] Kinsta: ${kinsta} | CDN: ${cdn} | Edge: ${edge} | Time: ${duration}s -> ${url}`);
-      return { ok: true, status: res.status, kinsta, cdn, edge };
+      return { ok: true, status: res.status, kinsta, cdn, edge, redirected: res.redirected, finalUrl: res.url };
     } catch (e) {
       if (attempt < RETRY_COUNT) {
         const backoff = 2 ** attempt;
@@ -137,7 +137,7 @@ function sleep(ms) {
 // ── Stats helpers ──
 
 function initStats() {
-  return { hit: 0, miss: 0, bypass: 0, unknown: 0 };
+  return { hit: 0, miss: 0, bypass: 0, unknown: 0, unknownBy: {} };
 }
 
 function tallyStats(stats, value) {
@@ -145,13 +145,45 @@ function tallyStats(stats, value) {
   if (v === "hit") stats.hit++;
   else if (v === "miss") stats.miss++;
   else if (v === "bypass") stats.bypass++;
-  else stats.unknown++;
+  else {
+    stats.unknown++;
+    stats.unknownBy[v] = (stats.unknownBy[v] || 0) + 1;
+  }
+}
+
+/** Returns true if the uppercased cache value is a known status (not UNKNOWN). */
+function isKnownCache(value) {
+  const v = (value || "").toLowerCase();
+  return v === "hit" || v === "miss" || v === "bypass";
 }
 
 function formatStats(label, stats, total) {
   const pct = (n) => total > 0 ? ` (${((n / total) * 100).toFixed(1)}%)` : "";
-  return `${label}: ${stats.hit} HIT${pct(stats.hit)}, ${stats.miss} MISS${pct(stats.miss)}, ${stats.bypass} BYPASS${pct(stats.bypass)}` +
-    (stats.unknown ? `, ${stats.unknown} UNKNOWN` : "");
+  let line = `${label}: ${stats.hit} HIT${pct(stats.hit)}, ${stats.miss} MISS${pct(stats.miss)}, ${stats.bypass} BYPASS${pct(stats.bypass)}`;
+  if (stats.unknown > 0) {
+    const breakdown = Object.entries(stats.unknownBy)
+      .map(([k, v]) => `${v} ${k.toUpperCase()}`)
+      .join(", ");
+    line += ` | ${breakdown}`;
+  }
+  return line;
+}
+
+/** Merge per-status stats into a single rollup. */
+function rollupStats(perStatus) {
+  const rollup = { kinsta: initStats(), cdn: initStats(), edge: initStats() };
+  for (const entry of Object.values(perStatus)) {
+    for (const layer of ["kinsta", "cdn", "edge"]) {
+      for (const k of ["hit", "miss", "bypass", "unknown"]) {
+        rollup[layer][k] += entry[layer][k];
+      }
+      // Merge unknownBy maps
+      for (const [val, count] of Object.entries(entry[layer].unknownBy)) {
+        rollup[layer].unknownBy[val] = (rollup[layer].unknownBy[val] || 0) + count;
+      }
+    }
+  }
+  return rollup;
 }
 
 async function runWarmer() {
@@ -162,11 +194,10 @@ async function runWarmer() {
   isRunning = true;
 
   const startTime = new Date().toISOString();
-  // Stats accumulators
-  const kinstaStats = initStats();
-  const cdnStats = initStats();
-  const edgeStats = initStats();
-  const failedUrls = [];
+
+  // ── Nested stats: { "200": { count, urls[], redirects[], unknowns[], kinsta, cdn, edge }, ... } ──
+  const perStatus = {};
+  const failedUrls = [];     // [{ url, error }] — no HTTP response, sits outside perStatus
 
   try {
     log("--- Starting Sitemap Discovery Phase ---");
@@ -185,21 +216,50 @@ async function runWarmer() {
     for (const url of allPages) {
       const result = await warmUrl(url);
       if (result.ok) {
-        tallyStats(kinstaStats, result.kinsta);
-        tallyStats(cdnStats, result.cdn);
-        tallyStats(edgeStats, result.edge);
+        const code = String(result.status);
+
+        // Init per-status bucket on first encounter
+        if (!perStatus[code]) {
+          perStatus[code] = {
+            count: 0,
+            urls: [],
+            redirects: [],
+            unknowns: [],
+            kinsta: initStats(),
+            cdn: initStats(),
+            edge: initStats(),
+          };
+        }
+        const bucket = perStatus[code];
+        bucket.count++;
+        bucket.urls.push(url);
+        tallyStats(bucket.kinsta, result.kinsta);
+        tallyStats(bucket.cdn, result.cdn);
+        tallyStats(bucket.edge, result.edge);
+
+        // Track UNKNOWN cache values nested under this status code
+        if (!isKnownCache(result.kinsta)) bucket.unknowns.push({ url, header: "Kinsta", value: result.kinsta });
+        if (!isKnownCache(result.cdn))   bucket.unknowns.push({ url, header: "CDN",    value: result.cdn });
+        if (!isKnownCache(result.edge))  bucket.unknowns.push({ url, header: "Edge",   value: result.edge });
+
+        // Track redirects nested under this status code
+        if (result.redirected) {
+          bucket.redirects.push({ from: url, to: result.finalUrl });
+        }
       } else {
         failedUrls.push({ url, error: result.error });
       }
       await sleep(REQUEST_DELAY_MS);
     }
 
-    // ── Summary ──
+    // ── Compute rollup ──
     const endTime = new Date().toISOString();
     const total = allPages.length;
     const ok = total - failedUrls.length;
     const fail = failedUrls.length;
+    const rollup = rollupStats(perStatus);
 
+    // ── Summary ──
     const summaryLines = [
       "",
       "═══════════════════════════════════════════",
@@ -211,14 +271,69 @@ async function runWarmer() {
       `Successful:  ${ok}`,
       `Failed:      ${fail}`,
       "",
-      "── Cache Status ──",
-      formatStats("Kinsta", kinstaStats, ok),
-      formatStats("CDN   ", cdnStats, ok),
-      formatStats("Edge  ", edgeStats, ok),
+      "── Cache Status (totals) ──",
+      formatStats("Kinsta", rollup.kinsta, ok),
+      formatStats("CDN   ", rollup.cdn, ok),
+      formatStats("Edge  ", rollup.edge, ok),
+      "",
+      "── Status Codes ──",
+      ...(() => {
+        const codes = Object.keys(perStatus).sort((a, b) => a.localeCompare(b));
+        return codes.map((code) => {
+          const pct = ((perStatus[code].count / ok) * 100).toFixed(1);
+          return `  ${code}: ${perStatus[code].count} (${pct}%)`;
+        });
+      })(),
+      "",
+      "── Per Status Code ──",
     ];
 
+    // Sort codes: 2xx first, then 3xx, 4xx, 5xx
+    const sortedCodes = Object.keys(perStatus).sort((a, b) => {
+      const ga = a[0], gb = b[0];
+      if (ga === gb) return a.localeCompare(b);
+      return ga.localeCompare(gb);
+    });
+
+    // Helper: get non-standard entries for a specific layer
+    const layerUnknowns = (bucket, layer) =>
+      bucket.unknowns.filter((u) => u.header === layer);
+
+    for (const code of sortedCodes) {
+      const b = perStatus[code];
+      summaryLines.push(`  ${code}: ${b.count} requests`);
+
+      // Kinsta
+      summaryLines.push(`    Kinsta: ${formatStats("", b.kinsta, b.count).replace(/^\S+\s*/, "")}`);
+      layerUnknowns(b, "Kinsta").forEach((u) =>
+        summaryLines.push(`      ${u.value}: ${u.url}`));
+
+      // CDN
+      summaryLines.push(`    CDN:    ${formatStats("", b.cdn, b.count).replace(/^\S+\s*/, "")}`);
+      layerUnknowns(b, "CDN").forEach((u) =>
+        summaryLines.push(`      ${u.value}: ${u.url}`));
+
+      // Edge
+      summaryLines.push(`    Edge:   ${formatStats("", b.edge, b.count).replace(/^\S+\s*/, "")}`);
+      layerUnknowns(b, "Edge").forEach((u) =>
+        summaryLines.push(`      ${u.value}: ${u.url}`));
+
+      // List URLs for non-2xx status codes
+      if (code[0] !== "2") {
+        const icon = code[0] === "3" ? "↳" : "✗";
+        summaryLines.push(`    URLs:`);
+        b.urls.forEach((u) => summaryLines.push(`      ${icon} ${u}`));
+      }
+
+      // Nested redirects under this status code
+      if (b.redirects.length > 0) {
+        summaryLines.push(`    Redirects:`);
+        b.redirects.forEach((r) => summaryLines.push(`      ↳ ${r.from}\n      → ${r.to}`));
+      }
+    }
+
     if (failedUrls.length > 0) {
-      summaryLines.push("", "── Failed URLs ──");
+      summaryLines.push("", "── Failed (no HTTP response) ──");
       failedUrls.forEach((f) =>
         summaryLines.push(`  ✗ ${f.url}\n    Reason: ${f.error}`)
       );
@@ -234,15 +349,28 @@ async function runWarmer() {
     console.log(summaryText);
 
     // Persist summary to disk for `npm run logs`
+    const statusCodes = {};
+    const redirectUrls = [];
+    const unknowns = [];
+    for (const [code, b] of Object.entries(perStatus)) {
+      statusCodes[code] = b.count;
+      redirectUrls.push(...b.redirects);
+      unknowns.push(...b.unknowns);
+    }
+
     const summaryJson = {
       started: startTime,
       finished: endTime,
       total,
       successful: ok,
       failed: fail,
-      kinsta: kinstaStats,
-      cdn: cdnStats,
-      edge: edgeStats,
+      statusCodes,
+      kinsta: rollup.kinsta,
+      cdn: rollup.cdn,
+      edge: rollup.edge,
+      perStatus,
+      redirectUrls,
+      unknowns,
       failedUrls,
     };
     fs.writeFileSync(SUMMARY_FILE, JSON.stringify(summaryJson, null, 2));

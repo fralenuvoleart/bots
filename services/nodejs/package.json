@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "warmer": "node -e \"require('./src/cache-warmer').runWarmer()\"",
-    "logs": "node -e \"const s=require('./cache-warmer-last-run.json'); console.log('Last run:', s.started, '→', s.finished); console.log('Total:', s.total, '| OK:', s.successful, '| Failed:', s.failed); console.log('Kinsta:', JSON.stringify(s.kinsta)); console.log('CDN:', JSON.stringify(s.cdn)); console.log('Edge:', JSON.stringify(s.edge)); if(s.failedUrls.length){ console.log('Failed URLs:'); s.failedUrls.forEach(f=>console.log('  ✗', f.url, '-', f.error)); }\""
+    "logs": "node -e \"const s=require('./cache-warmer-last-run.json'); console.log('Last run:', s.started, '→', s.finished); console.log('Total:', s.total, '| OK:', s.successful, '| Failed:', s.failed); if(s.statusCodes){ console.log('Status codes:', JSON.stringify(s.statusCodes)); } console.log('Kinsta:', JSON.stringify(s.kinsta)); console.log('CDN:', JSON.stringify(s.cdn)); console.log('Edge:', JSON.stringify(s.edge)); if(s.redirectUrls&&s.redirectUrls.length){ console.log('Redirects:'); s.redirectUrls.forEach(r=>console.log('  ↳', r.from, '→', r.to)); } if(s.unknowns&&s.unknowns.length){ console.log('Other responses:'); s.unknowns.forEach(u=>console.log('  '+u.header+': '+u.value+' — '+u.url)); } if(s.failedUrls&&s.failedUrls.length){ console.log('Failed URLs:'); s.failedUrls.forEach(f=>console.log('  ✗', f.url, '-', f.error)); }\""
   },
   "dependencies": {
     "telegraf": "^4.16.3",

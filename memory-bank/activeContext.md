@@ -8,6 +8,16 @@ Project is `automations` — two service runtimes:
 
 ## Recent Changes
 
+- **2026-07-20**: Enhanced [`cache-warmer.js`](../services/nodejs/src/cache-warmer.js) — nested stats architecture:
+  - Stats grouped per HTTP status code with independent cache counters (Kinsta/CDN/Edge)
+  - Top-level rollup computed from nested data; summary shows both totals and per-status drill-down
+  - Non-2xx status codes list each URL individually in the summary
+  - UNKNOWN cache values tracked with full detail: which URL, which header layer, raw value
+  - Redirect detection via `res.redirected` — lists `from → to` for any redirected URLs
+  - Cache header values uppercased in logs and display (`HIT`/`MISS`/`BYPASS`)
+  - New persisted fields: `perStatus`, `unknowns`, `redirectUrls`, `statusCodes`
+  - `npm run logs` updated with backward-compatible null checks
+- **2026-07-20**: Created [`docs/WARMER.md`](../docs/WARMER.md) — comprehensive documentation covering warmer logic, cache header semantics, configuration, and explanation of why warmer stats (548 sitemap URLs, 100% HIT) differ from Kinsta Analytics (all traffic, includes MISS/BYPASS/non-cached).
 - **2026-07-19**: Patched [`telegram-bot.js`](../services/nodejs/src/telegram-bot.js) — 6 fixes applied:
   1. `t()` helper no longer coerces missing `name` to `"undefined"` string
   2. Deep-clone via `JSON.parse(JSON.stringify())` prevents env-var overrides from mutating the `require()`-cached messages

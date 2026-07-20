@@ -9,6 +9,8 @@
 - [x] Descriptive file naming: `telegram-bot.js`, `cache-warmer.js`
 - [x] `index.js` simplified to wiring layer (imports + cron)
 - [x] Old `pbs-telegram/` directory cleaned up
+- [x] Cache warmer documentation created: `docs/WARMER.md` — covers logic, cache headers, analytics discrepancy explanation
+- [x] Cache warmer granular stats: HTTP status code breakdown, redirect tracking, uppercase cache labels
 
 ## In Progress
 
