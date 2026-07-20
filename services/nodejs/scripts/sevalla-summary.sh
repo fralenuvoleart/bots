@@ -10,7 +10,7 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
   "https://api.sevalla.com/v3/applications/${APP_ID}/processes/${PROCESS_ID}/exec" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"command":["npm","run","logs"],"timeout":15}')
+  -d '{"command":"npm run logs","timeout":15}')
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
